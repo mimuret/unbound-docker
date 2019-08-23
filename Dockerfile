@@ -1,0 +1,80 @@
+FROM alpine:3.10 as builder
+ARG VERSION
+RUN apk --update --no-cache add wget gcc make musl-dev
+RUN apk --update --no-cache add libevent-dev openssl-dev protobuf-c fstrm-dev protobuf-c-dev expat-dev
+RUN wget https://nlnetlabs.nl/downloads/unbound/unbound-${VERSION}.tar.gz
+RUN tar -zxf unbound-${VERSION}.tar.gz
+RUN cd unbound-${VERSION} \
+&& ./configure \
+--sysconfdir=/etc \
+--prefix=/unbound \
+--with-username=daemon \
+--enable-checking \
+--enable-subnet \
+--enable-dnstap \
+--with-libevent=/usr \
+--with-protobuf-c=/usr \
+--with-libfstrm=/usr \
+&& make -j4 \
+&& make install \
+&& rm -rf /unbound/share /unbound/etc \
+&& mkdir -p /unbound/var/run
+
+FROM alpine:3.10
+ARG VERSION
+ENV UNBOUND_VERBOSITY 1
+ENV UNBOUND_NUM_THREADS 1
+ENV UNBOUND_OUTGOING_RANGE 9192
+ENV UNBOUND_OUTGOING_NUM_TCP 1000
+ENV UNBOUND_INCOMING_NUM_TCP 1000
+ENV UNBOUND_SO_RCVBUF "0"
+ENV UNBOUND_SO_SNDBUF "0"
+ENV UNBOUND_EDNS_BUFFER_SIZE 1220
+ENV UNBOUND_MAX_UDP_SIZE 1220
+ENV UNBOUND_STREAM_WAIT_SIZE "4m"
+ENV UNBOUND_MSG_BUFFER_SIZE 65552
+ENV UNBOUND_MSG_CACHE_SIZE "128m"
+ENV UNBOUND_MSG_CACHE_SLABS 4
+ENV UNBOUND_NUM_QUERIES_PER_THREAD 4096
+ENV UNBOUND_JOSTLE_TIMEOUT 200
+ENV UNBOUND_DELAY_CLOSE 0
+ENV UNBOUND_RRSET_CACHE_SIZE "256m"
+ENV UNBOUND_RRSET_CACHE_SLABS 4
+ENV UNBOUND_CACHE_MAX_TTL 86400
+ENV UNBOUND_CACHE_NEGATIVE_TTL 3600
+ENV UNBOUND_INFRA_HOST_TTL 900
+ENV UNBOUND_INFRA_CACHE_MIN_RTT 50
+ENV UNBOUND_INFRA_CACHE_SLABS 4
+ENV UNBOUND_INFRA_CACHE_NUMHOSTS 100000
+ENV UNBOUND_DO_IPV4 "yes"
+ENV UNBOUND_DO_IPV6 "no"
+ENV UNBOUND_ROOT_HINTS ""
+ENV UNBOUND_HIDE_VERSION "yes"
+ENV UNBOUND_HIDE_IDENTITY "yes"
+ENV UNBOUND_HIDE_TRUSTANCHOR "yes"
+ENV UNBOUND_IDENTITY ""
+ENV UNBOUND_VERSION "unbound"
+ENV UNBOUND_QNAME_MINIMISATION "yes"
+ENV UNBOUND_QNAME_MINIMISATION_STRICT "no"
+ENV UNBOUND_AGGRESSIVE_NSEC "yes"
+ENV UNBOUND_PREFETCH "yes"
+ENV UNBOUND_PREFETCH_KEY "yes"
+ENV UNBOUND_DENY_ANY "yes"
+ENV UNBOUND_RRSET_ROUNDROBIN "yes"
+ENV UNBOUND_MINIMAL_RESPONSE "yes"
+ENV UNBOUND_MODULE_CONFIG "validator iterator"
+ENV UNBOUND_VAL_LOG_LEVEL 1
+ENV UNBOUND_TLS_SERVICE_KEY ""
+ENV UNBOUND_TLS_SERVICE_PEM ""
+ENV UNBOUND_TLS_CIPHERS "DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA256:DHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA256"
+ENV UNBOUND_TLS_CHIPHERSUITES "TLS_AES_128_GCM_SHA256:TLS_AES_128_CCM_8_SHA256:TLS_AES_128_CCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
+
+COPY entrypoint.sh /
+RUN apk --update --no-cache add libevent openssl fstrm protobuf-c expat gettext && \
+chmod 755 /entrypoint.sh && \
+ln -s /dev/stdout /var/log/unbound.log
+COPY --from=builder --chown=daemon:daemon /unbound /unbound
+COPY --chown=daemon:daemon conf /etc/unbound
+
+ENTRYPOINT [ "/entrypoint.sh" ]
+CMD ["/unbound/sbin/unbound","-d", "-c", "/etc/unbound/unbound.conf"]
